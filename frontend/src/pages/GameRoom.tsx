@@ -451,12 +451,22 @@ const GameRoom: React.FC = () => {
   const connectWebSocket = useCallback(() => {
     if (!gameId) return;
 
+    // 防止重复连接
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+      console.log('🔌 WebSocket连接已存在，跳过重复连接');
+      return;
+    }
+
     console.log('🔌 开始建立WebSocket连接...', gameId);
 
     // 如果已有连接，先关闭
     if (wsRef.current) {
       console.log('🔌 关闭现有连接');
-      wsRef.current.close();
+      try {
+        wsRef.current.close();
+      } catch (e) {
+        console.warn('关闭WebSocket连接时出错:', e);
+      }
       wsRef.current = null;
     }
 
@@ -750,14 +760,14 @@ const GameRoom: React.FC = () => {
     }
     
     return (
-      <Box>
+      <React.Fragment>
         {parts.map((part, index) => (
           <React.Fragment key={index}>
             {part}
             {index < parts.length - 1 && parts[index + 1].key?.startsWith('think-') && <br />}
           </React.Fragment>
         ))}
-      </Box>
+      </React.Fragment>
     );
   };
 
@@ -1310,21 +1320,21 @@ const GameRoom: React.FC = () => {
                     <ListItemText
                       primary={participant.human_name || `参与者 ${index + 1}`}
                       secondary={
-                        <Box>
-                          <Typography variant="body2" color="text.secondary">
+                        <React.Fragment>
+                          <span style={{ display: 'block', fontSize: '0.875rem', color: 'rgba(0, 0, 0, 0.6)' }}>
                             模型: {participant.model_name || '未知'}
-                          </Typography>
+                          </span>
                           {participant.background && (
-                            <Typography variant="body2" color="text.secondary">
+                            <span style={{ display: 'block', fontSize: '0.875rem', color: 'rgba(0, 0, 0, 0.6)' }}>
                               背景: {participant.background}
-                            </Typography>
+                            </span>
                           )}
                           {participant.personality && (
-                            <Typography variant="body2" color="text.secondary">
+                            <span style={{ display: 'block', fontSize: '0.875rem', color: 'rgba(0, 0, 0, 0.6)' }}>
                               性格: {participant.personality}
-                            </Typography>
+                            </span>
                           )}
-                        </Box>
+                        </React.Fragment>
                       }
                     />
                     <Chip

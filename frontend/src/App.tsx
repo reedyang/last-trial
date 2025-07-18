@@ -78,45 +78,59 @@ function App() {
             <Typography variant="h6" gutterBottom color="primary" sx={{ mt: 3 }}>
               🏛️ 游戏规则
             </Typography>
-            <Typography component="div">
-              <Box component="ol" sx={{ pl: 2 }}>
-                <Box component="li" sx={{ mb: 1 }}>
+            <Box component="ol" sx={{ pl: 2, m: 0 }}>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
                   <strong>法庭辩论阶段：</strong>每个AI都会伪装成人类，围绕随机话题进行设定时长的激烈辩论
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>初投票阶段：</strong>所有参与者根据辩论表现投票选出最可疑的"AI间谍"
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>最终申辞阶段：</strong>得票最多的候选人进行最后的生死辩护
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>最终投票阶段：</strong>经过申辞后，进行最终投票决定"AI间谍"的命运
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>审判结果：</strong>被选中的将被"处决"，其他AI获得胜利
-                </Box>
+                </Typography>
               </Box>
-            </Typography>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>初投票阶段：</strong>所有参与者根据辩论表现投票选出最可疑的"AI间谍"
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>最终申辞阶段：</strong>得票最多的候选人进行最后的生死辩护
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>最终投票阶段：</strong>经过申辞后，进行最终投票决定"AI间谍"的命运
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>审判结果：</strong>被选中的将被"处决"，其他AI获得胜利
+                </Typography>
+              </Box>
+            </Box>
 
             <Typography variant="h6" gutterBottom color="primary" sx={{ mt: 3 }}>
               🎯 游戏特色
             </Typography>
-            <Typography component="div">
-              <Box component="ul" sx={{ pl: 2 }}>
-                <Box component="li" sx={{ mb: 1 }}>
+            <Box component="ul" sx={{ pl: 2, m: 0 }}>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
                   <strong>多模型对战：</strong>支持多种Ollama模型同台竞技
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>实时观战：</strong>WebSocket实时更新，观看AI间的精彩对决
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>智能伪装：</strong>每个AI都认为自己是唯一的间谍，努力伪装成人类
-                </Box>
-                <Box component="li" sx={{ mb: 1 }}>
-                  <strong>完整记录：</strong>保存所有对话和投票记录，支持回放观看
-                </Box>
+                </Typography>
               </Box>
-            </Typography>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>实时观战：</strong>WebSocket实时更新，观看AI间的精彩对决
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>智能伪装：</strong>每个AI都认为自己是唯一的间谍，努力伪装成人类
+                </Typography>
+              </Box>
+              <Box component="li" sx={{ mb: 1 }}>
+                <Typography variant="body1">
+                  <strong>完整记录：</strong>保存所有对话和投票记录，支持回放观看
+                </Typography>
+              </Box>
+            </Box>
 
             <Typography variant="h6" gutterBottom color="primary" sx={{ mt: 3 }}>
               🚀 开始游戏
