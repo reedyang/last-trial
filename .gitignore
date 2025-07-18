@@ -1,0 +1,4 @@
+*.db
+*.pyc
+/backend/venv
+/frontend/node_modules
