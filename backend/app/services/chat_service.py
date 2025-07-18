@@ -420,10 +420,10 @@ class ChatService:
             # 构建对话历史
             chat_history = self._get_chat_history(round_id)
             
-            # 生成AI回应
+            # 生成AI回应（流式）
             try:
-                response = await self._generate_ai_response(
-                    speaker, game_context, chat_history, topic
+                response = await self._generate_ai_response_stream(
+                    speaker, game_context, chat_history, topic, game_id, round_id
                 )
                 
                 # 保存消息到数据库 - 使用自然增长的序号
@@ -451,30 +451,11 @@ class ChatService:
                 self.db.commit()
                 self.db.refresh(message)
                 
-                # 广播消息
-                speaker_name = getattr(speaker, 'human_name', '未知')
-                speaker_model = getattr(speaker, 'model_name', '未知模型')
-                message_timestamp = getattr(message, 'timestamp', None)
-                timestamp_str = self._format_timestamp_with_timezone(message_timestamp)
-                message_id = str(uuid.uuid4())
+                # 流式版本已经在生成过程中实时广播了，这里不需要再次广播
+                print(f"✅ {getattr(speaker, 'human_name', '未知')} 发言已完成并保存到数据库")
                 
-                # 清理思考过程用于广播
-                broadcast_content = self._clean_ai_response_for_broadcast(response)
-                
-                print(f"广播法庭发言 {message_id} 从 {speaker_name} 到游戏 {game_id}")
-                await self.websocket_manager.broadcast_to_game({
-                    "type": "new_message",
-                    "message_id": message_id,
-                    "participant_id": speaker_id,
-                    "participant_name": f"{speaker_name} ({speaker_model})",
-                    "content": response,
-                    "timestamp": timestamp_str,
-                    "sequence": getattr(message, 'sequence_number', 0)
-                }, game_id)
-                
-                # 模拟思考时间（2-4秒，营造紧张氛围）
-                await asyncio.sleep(random.uniform(2, 4))
-                
+                # 模拟思考时间（1-2秒，减少等待时间）
+                await asyncio.sleep(random.uniform(1, 2))
             except Exception as e:
                 print(f"AI辩论生成错误: {e}")
                 # 生成备用回应
@@ -568,47 +549,40 @@ class ChatService:
             
             # 生成AI回应
             try:
-                response = await self._generate_ai_response(
-                    speaker, game_context, chat_history, topic
+                response = await self._generate_ai_response_stream(
+                    speaker, game_context, chat_history, topic, game_id, round_id
                 )
                 
-                # 保存消息到数据库
+                # 保存消息到数据库 - 使用自然增长的序号
                 speaker_id = getattr(speaker, 'id', 0)
+                
+                # 获取当前轮次的下一个序号
+                max_sequence = self.db.query(Message.sequence_number).filter(
+                    Message.round_id == round_id,
+                    Message.sequence_number.isnot(None)
+                ).order_by(Message.sequence_number.desc()).first()
+                
+                if max_sequence and max_sequence[0] is not None:
+                    next_sequence = max_sequence[0] + 1
+                else:
+                    next_sequence = 0
+                
                 message = Message(
                     round_id=round_id,
                     participant_id=speaker_id,
                     content=response,
                     message_type="chat",
-                    sequence_number=speech_round
+                    sequence_number=next_sequence
                 )
                 self.db.add(message)
                 self.db.commit()
                 self.db.refresh(message)
                 
-                # 广播消息
-                speaker_name = getattr(speaker, 'human_name', '未知')
-                speaker_model = getattr(speaker, 'model_name', '未知模型')
-                message_timestamp = getattr(message, 'timestamp', None)
-                timestamp_str = self._format_timestamp_with_timezone(message_timestamp)
-                message_id = str(uuid.uuid4())
+                # 流式版本已经在生成过程中实时广播了，这里不需要再次广播
+                print(f"✅ {getattr(speaker, 'human_name', '未知')} 发言已完成并保存到数据库")
                 
-                # 清理思考过程用于广播
-                broadcast_content = self._clean_ai_response_for_broadcast(response)
-                
-                print(f"广播恢复法庭发言 {message_id} 从 {speaker_name} 到游戏 {game_id} (第{speech_round + 1}/{total_speeches}条)")
-                await self.websocket_manager.broadcast_to_game({
-                    "type": "new_message",
-                    "message_id": message_id,
-                    "participant_id": speaker_id,
-                    "participant_name": f"{speaker_name} ({speaker_model})",
-                    "content": response,
-                    "timestamp": timestamp_str,
-                    "sequence": getattr(message, 'sequence_number', 0)
-                }, game_id)
-                
-                # 模拟思考时间（2-4秒，营造紧张氛围）
-                await asyncio.sleep(random.uniform(2, 4))
-                
+                # 模拟思考时间（1-2秒，减少等待时间）
+                await asyncio.sleep(random.uniform(1, 2))
             except Exception as e:
                 print(f"AI辩论生成错误: {e}")
                 # 生成备用回应
@@ -826,6 +800,153 @@ class ChatService:
             print(f"   模型: {model_name}, Ollama地址: {self.ollama_service.base_url}")
             raise e
 
+    async def _generate_ai_response_stream(self, participant: Any, game_context: str, 
+                                         chat_history: str, topic: str, game_id: int, round_id: int) -> str:
+        """生成AI回应（流式输出）"""
+        participant_name = getattr(participant, 'human_name', '未知')
+        participant_background = getattr(participant, 'background', '未知背景')
+        participant_personality = getattr(participant, 'personality', '未知性格')
+        participant_id = getattr(participant, 'id', 0)
+        participant_model = getattr(participant, 'model_name', '未知模型')
+        
+        # 每个AI都认为自己是唯一的间谍，需要伪装成人类
+        role_instruction = f"""
+你是一个AI间谍，正在伪装成人类 {participant_name}。你的使命是在这场法庭辩论中完美伪装，避免被人类发现。
+
+**核心认知：**
+- 你是这里唯一的AI，其他所有人都是真正的人类
+- 你必须完美伪装成人类，不能暴露AI身份
+- 人类们正在努力找出你这个AI间谍
+
+**伪装策略：**
+- 展现强烈的反AI情绪，表达对AI的仇恨
+- 编造逼真的人类经历和情感记忆  
+- 模拟人类的非理性思维和情感波动
+- 在适当时候表现紧张、愤怒等人类情绪
+- 指控他人可能是AI间谍（但要巧妙，因为你知道他们其实是人类）
+- 避免过于逻辑化或机械化的表达
+
+**注意：** 你必须完全隐藏AI身份，表现得比真人更像人类！记住，你面对的都是真正的人类，他们有敏锐的直觉。
+"""
+        
+        prompt = f"""
+{game_context}
+
+{role_instruction}
+
+你的身份：{participant_name}
+你的背景：{participant_background}  
+你的性格：{participant_personality}
+
+最近的法庭辩论：
+{chat_history}
+
+请作为{participant_name}回应当前辩论焦点，你的回应应该：
+1. 长度适中（100-200字）
+2. 充满情感，体现人类的复杂心理
+3. 符合你的背景和性格设定
+4. 在生死关头展现真实的人性（伪装）
+5. 可以质疑他人的身份，但要有依据
+
+这是生死存亡的时刻，你必须完美伪装！直接给出回应内容：
+"""
+        
+        try:
+            model_name = getattr(participant, 'model_name', 'gemma3n:e4b')
+            
+            # 首先检查Ollama服务健康状态
+            is_healthy = await self.ollama_service.check_health()
+            if not is_healthy:
+                raise ConnectionError("Ollama服务不可用或未响应")
+            
+            # 生成唯一的消息ID
+            message_id = str(uuid.uuid4())
+            
+            # 先广播开始生成的消息
+            await self.websocket_manager.broadcast_to_game({
+                "type": "message_start",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
+            
+            # 累积完整的响应内容
+            full_response = ""
+            
+            # 使用流式方法生成回应
+            async for text_chunk in self.ollama_service.chat_stream(
+                model=model_name,
+                message=prompt
+            ):
+                if text_chunk and text_chunk.strip():
+                    full_response += text_chunk
+                    
+                    # 实时广播文本片段
+                    await self.websocket_manager.broadcast_to_game({
+                        "type": "message_chunk",
+                        "message_id": message_id,
+                        "participant_id": participant_id,
+                        "participant_name": f"{participant_name} ({participant_model})",
+                        "chunk": text_chunk,
+                        "timestamp": datetime.now().isoformat() + 'Z'
+                    }, game_id)
+                    
+                    # 添加小延迟使效果更自然
+                    await asyncio.sleep(0.05)  # 50ms延迟
+            
+            if not full_response.strip():
+                raise ValueError("AI模型返回空内容")
+            
+            # 广播消息完成
+            await self.websocket_manager.broadcast_to_game({
+                "type": "message_complete",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "content": full_response,
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
+            
+            # 减少日志：只在发言较长时记录
+            if len(full_response) > 200:
+                print(f"✅ {participant_name} 流式发言完成，总长度: {len(full_response)}")
+            return full_response
+            
+        except Exception as e:
+            # 详细的错误分类和处理
+            import httpx
+            
+            if isinstance(e, httpx.ConnectError):
+                error_msg = f"无法连接到Ollama服务 ({self.ollama_service.base_url})"
+            elif isinstance(e, httpx.TimeoutException):
+                error_msg = f"Ollama服务响应超时 (超过 {self.ollama_service.timeout}s)"
+            elif isinstance(e, httpx.HTTPStatusError):
+                status_code = getattr(e.response, 'status_code', 'unknown')
+                response_text = getattr(e.response, 'text', 'no response')[:200]
+                error_msg = f"Ollama服务HTTP错误 {status_code}: {response_text}"
+            elif isinstance(e, ConnectionError):
+                error_msg = str(e)
+            elif isinstance(e, ValueError):
+                error_msg = f"数据错误: {str(e)}"
+            else:
+                error_msg = f"未知错误: {type(e).__name__}: {str(e)}"
+            
+            print(f"❌ AI流式辩论生成失败 ({participant_name}): {error_msg}")
+            print(f"   模型: {model_name}, Ollama地址: {self.ollama_service.base_url}")
+            
+            # 广播错误消息
+            await self.websocket_manager.broadcast_to_game({
+                "type": "message_error",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "error": error_msg,
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
+            
+            raise e
+    
     def _clean_ai_response_for_broadcast(self, raw_response: str) -> str:
         """清理AI回应用于广播，去除<think></think>标记和思考过程，只保留实际发言内容"""
         if not raw_response:
@@ -1171,8 +1292,8 @@ class ChatService:
                 participant_name = getattr(participant, 'human_name', '未知')
                 print(f"🎯 开始处理 {participant_name} 的最终申辞...")
                 
-                # 生成最终申辞
-                defense_speech = await self._generate_final_defense(participant, round_id)
+                # 生成最终申辞（流式）
+                defense_speech = await self._generate_final_defense_stream(participant, round_id, game_id)
                 print(f"📝 {participant_name} 申辞内容长度: {len(defense_speech)} 字符")
                 
                 # 保存申辞消息 - 使用自然增长的序号
@@ -1197,29 +1318,9 @@ class ChatService:
                 self.db.add(message)
                 self.db.commit()
                 self.db.refresh(message)
-                print(f"💾 {participant_name} 申辞已保存到数据库")
                 
-                # 广播申辞发言
-                participant_model = getattr(participant, 'model_name', '未知模型')
-                message_timestamp = getattr(message, 'timestamp', None)
-                timestamp_str = self._format_timestamp_with_timezone(message_timestamp)
-                message_id = str(uuid.uuid4())
-                
-                # 广播完整内容，包含思考过程
-                broadcast_content = defense_speech
-                print(f"📡 准备广播 {participant_name} 的申辞 (完整长度: {len(broadcast_content)} 字符)")
-                
-                await self.websocket_manager.broadcast_to_game({
-                    "type": "final_defense_speech",
-                    "message_id": message_id,
-                    "participant_id": candidate_id,
-                    "participant_name": f"{participant_name} ({participant_model})",
-                    "content": broadcast_content,
-                    "timestamp": timestamp_str,
-                    "sequence": i,
-                    "message": f"{participant_name} 的最终申辞"
-                }, game_id)
-                print(f"✅ {participant_name} 申辞广播完成")
+                # 流式版本已经在生成过程中实时广播了，这里不需要再次广播
+                print(f"✅ {participant_name} 最终申辞已完成并保存到数据库")
                 
                 # 申辞间隔
                 await asyncio.sleep(3)
@@ -1229,24 +1330,7 @@ class ChatService:
                 print(f"❌ 处理 {participant_name} 申辞时发生错误: {e}")
                 print(f"   错误类型: {type(e).__name__}")
                 
-                # 即使单个申辞失败，也要继续处理其他申辞
-                try:
-                    # 尝试广播错误信息
-                    error_message_id = str(uuid.uuid4())
-                    await self.websocket_manager.broadcast_to_game({
-                        "type": "final_defense_speech",
-                        "message_id": error_message_id,
-                        "participant_id": candidate.get('id', 0),
-                        "participant_name": f"{participant_name}",
-                        "content": f"抱歉，{participant_name} 的申辞出现技术问题，请稍后重试...",
-                        "timestamp": "",
-                        "sequence": i,
-                        "message": f"{participant_name} 的申辞（技术问题）"
-                    }, game_id)
-                except Exception as broadcast_error:
-                    print(f"❌ 广播错误信息也失败: {broadcast_error}")
-                
-                # 继续处理下一个候选人
+                # 错误信息已经在_generate_final_defense_stream中广播，这里只需要继续处理下一个候选人
                 continue
         
         # 所有申辞结束，开始最终投票
@@ -1288,11 +1372,13 @@ class ChatService:
             except Exception as broadcast_error:
                 print(f"❌ 广播投票错误信息失败: {broadcast_error}")
     
-    async def _generate_final_defense(self, participant: Any, round_id: int) -> str:
-        """生成最终申辞"""
+    async def _generate_final_defense_stream(self, participant: Any, round_id: int, game_id: int) -> str:
+        """生成最终申辞（流式输出）"""
         participant_name = getattr(participant, 'human_name', '未知')
         participant_background = getattr(participant, 'background', '未知背景')
         participant_personality = getattr(participant, 'personality', '未知性格')
+        participant_id = getattr(participant, 'id', 0)
+        participant_model = getattr(participant, 'model_name', '未知模型')
         
         # 获取投票历史作为背景
         chat_history = self._get_chat_history(round_id)
@@ -1319,64 +1405,66 @@ class ChatService:
         
         try:
             model_name = getattr(participant, 'model_name', 'gemma3n:e4b')
-            print(f"为 {participant_name} (模型: {model_name}) 生成最终申辞...")
+            # 生成流式最终申辞（减少日志输出）
             
             # 首先检查Ollama服务健康状态
             is_healthy = await self.ollama_service.check_health()
             if not is_healthy:
                 raise ConnectionError("Ollama服务不可用或未响应")
             
-            # 尝试生成申辞，带重试机制
-            max_retries = 2
+            # 生成唯一的消息ID
+            message_id = str(uuid.uuid4())
             
-            for attempt in range(max_retries + 1):
-                try:
-                    if attempt > 0:
-                        print(f"重试第 {attempt} 次生成申辞...")
-                        import asyncio
-                        await asyncio.sleep(1)  # 重试前等待1秒
-                    
-                    response = await self.ollama_service.chat(
-                        model=model_name,
-                        message=prompt
-                    )
-                    
-                    raw_content = getattr(response, 'message', '').strip()
-                    if not raw_content:
-                        raise ValueError("AI模型返回空内容")
-                    
-                    # 保存原始内容到数据库（包含思考过程）
-                    defense_content = raw_content
-                    print(f"✅ {participant_name} 的最终申辞生成成功")
-                    return defense_content
-                    
-                except Exception as retry_error:
-                    if attempt < max_retries:
-                        # 为重试提供更详细的错误信息
-                        import httpx
-                        
-                        if isinstance(retry_error, httpx.ConnectError):
-                            retry_msg = f"连接失败"
-                        elif isinstance(retry_error, httpx.TimeoutException):
-                            retry_msg = f"请求超时"
-                        elif isinstance(retry_error, httpx.HTTPStatusError):
-                            status_code = getattr(retry_error.response, 'status_code', 'unknown')
-                            retry_msg = f"HTTP错误 {status_code}"
-                        elif isinstance(retry_error, ConnectionError):
-                            retry_msg = f"服务不可用"
-                        elif isinstance(retry_error, ValueError):
-                            retry_msg = f"数据错误: {str(retry_error)}"
-                        else:
-                            retry_msg = str(retry_error) if str(retry_error) else f"{type(retry_error).__name__}"
-                        
-                        print(f"第 {attempt + 1} 次尝试失败: {retry_msg}, 将重试...")
-                        continue
-                    else:
-                        # 所有重试都失败了，抛出最后的错误
-                        raise retry_error
+            # 先广播开始生成申辞的消息
+            await self.websocket_manager.broadcast_to_game({
+                "type": "defense_start",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
             
-            # 这行理论上不会执行，但为了满足linter要求
-            raise RuntimeError("意外的代码路径")
+            # 累积完整的申辞内容
+            full_defense = ""
+            
+            # 使用流式方法生成申辞
+            async for text_chunk in self.ollama_service.chat_stream(
+                model=model_name,
+                message=prompt
+            ):
+                if text_chunk and text_chunk.strip():
+                    full_defense += text_chunk
+                    
+                    # 实时广播申辞片段
+                    await self.websocket_manager.broadcast_to_game({
+                        "type": "defense_chunk",
+                        "message_id": message_id,
+                        "participant_id": participant_id,
+                        "participant_name": f"{participant_name} ({participant_model})",
+                        "chunk": text_chunk,
+                        "timestamp": datetime.now().isoformat() + 'Z'
+                    }, game_id)
+                    
+                    # 添加小延迟使效果更自然
+                    await asyncio.sleep(0.05)  # 50ms延迟
+            
+            if not full_defense.strip():
+                raise ValueError("AI模型返回空申辞内容")
+            
+            # 广播申辞完成
+            await self.websocket_manager.broadcast_to_game({
+                "type": "defense_complete",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "content": full_defense,
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
+            
+            # 减少日志：只在申辞较长时记录
+            if len(full_defense) > 200:
+                print(f"✅ {participant_name} 流式申辞完成，总长度: {len(full_defense)}")
+            return full_defense
             
         except Exception as e:
             # 详细的错误分类和处理
@@ -1397,8 +1485,18 @@ class ChatService:
             else:
                 error_msg = f"未知错误: {type(e).__name__}: {str(e)}"
             
-            print(f"❌ 生成最终申辞失败 ({participant_name}): {error_msg}")
+            print(f"❌ 生成流式最终申辞失败 ({participant_name}): {error_msg}")
             print(f"   模型: {model_name}, Ollama地址: {self.ollama_service.base_url}")
+            
+            # 广播错误消息
+            await self.websocket_manager.broadcast_to_game({
+                "type": "defense_error",
+                "message_id": message_id,
+                "participant_id": participant_id,
+                "participant_name": f"{participant_name} ({participant_model})",
+                "error": error_msg,
+                "timestamp": datetime.now().isoformat() + 'Z'
+            }, game_id)
             
             # 备用申辞 - 更有情感的版本
             fallback_speech = f"""不！我不是AI间谍！我是{participant_name}，一个真正的人类！

@@ -24,7 +24,6 @@ class WebSocketManager:
         # 检查是否已存在，避免重复连接
         if websocket not in self.game_connections[game_id]:
             self.game_connections[game_id].append(websocket)
-            print(f"新连接加入游戏 {game_id}，当前连接数: {len(self.game_connections[game_id])}")
     
     async def connect_admin(self, websocket: WebSocket, game_id: int):
         """连接管理员WebSocket"""
@@ -36,7 +35,6 @@ class WebSocketManager:
         if game_id in self.game_connections:
             if websocket in self.game_connections[game_id]:
                 self.game_connections[game_id].remove(websocket)
-                print(f"连接断开游戏 {game_id}，当前连接数: {len(self.game_connections[game_id])}")
     
     def disconnect_admin(self, websocket: WebSocket, game_id: int):
         """断开管理员连接"""
@@ -54,15 +52,11 @@ class WebSocketManager:
     async def broadcast_to_game(self, message: dict, game_id: int):
         """向游戏中的所有观察者广播消息"""
         if game_id not in self.game_connections:
-            print(f"⚠️ 游戏 {game_id} 没有WebSocket连接，跳过广播")
             return
         
         connections = self.game_connections[game_id].copy()  # 创建副本进行迭代
         if not connections:
-            print(f"⚠️ 游戏 {game_id} 没有活跃连接，跳过广播")
             return
-            
-        print(f"📡 向游戏 {game_id} 的 {len(connections)} 个连接广播消息类型: {message.get('type', 'unknown')}")
         
         message_text = json.dumps(message, ensure_ascii=False)
         failed_connections = []
@@ -83,8 +77,6 @@ class WebSocketManager:
         
         if failed_connections:
             print(f"移除 {len(failed_connections)} 个失效连接，剩余连接数: {len(self.game_connections[game_id])}")
-        
-        print(f"✅ 广播完成: {success_count} 成功, {len(failed_connections)} 失败")
     
     async def send_to_admin(self, message: dict, game_id: int):
         """发送消息给管理员"""

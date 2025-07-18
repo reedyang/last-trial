@@ -34,10 +34,12 @@ const VotingResultTable: React.FC<VotingResultTableProps> = ({
   votingData, 
   title = "投票结果" 
 }) => {
-  // 只在开发模式下输出简化的日志
-  if (process.env.NODE_ENV === 'development') {
-    console.log('📊 VotingResultTable:', title, '候选人数:', votingData?.candidates?.length || 0);
-  }
+  // 使用 React.useEffect 避免重复日志，只在组件挂载时输出一次
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📊 VotingResultTable 渲染:', title, '候选人数:', votingData?.candidates?.length || 0);
+    }
+  }, [title, votingData?.candidates?.length]);
   
   if (!votingData.candidates.length) {
     console.log('⚠️ VotingResultTable: 无投票数据');

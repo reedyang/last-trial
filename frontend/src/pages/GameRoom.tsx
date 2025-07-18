@@ -76,6 +76,12 @@ interface ChatMessage {
   };
   title?: string; // For voting table title
   vote_summary?: any; // Added for vote_summary
+  // 流式消息支持
+  message_id?: string; // 消息唯一标识
+  chunk?: string; // 文本片段
+  isStreaming?: boolean; // 是否正在流式显示
+  streamingContent?: string; // 当前累积的流式内容
+  error?: string; // 错误信息
 }
 
 const GameRoom: React.FC = () => {
@@ -97,6 +103,21 @@ const GameRoom: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isInitializingRef = useRef(false);
+
+  // 添加打字机光标闪烁动画的CSS样式
+  React.useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
 
 
   // 轻量级的游戏状态刷新函数（不重新加载历史消息）
@@ -217,7 +238,6 @@ const GameRoom: React.FC = () => {
                 content.includes('获胜者') ||
                 content.includes('胜利者') ||
                 content.includes('AI们正在实名投票')) {
-              console.log('✅ 保留重要系统消息:', content.substring(0, 50) + '...');
               return true;
             }
             
@@ -225,7 +245,6 @@ const GameRoom: React.FC = () => {
             if (content.includes('开始投票') || 
                 content.includes('请选择') ||
                 content.includes('投票中')) {
-              console.log('🗑️ 过滤过时的系统消息:', content.substring(0, 30) + '...');
               return false;
             }
           }
@@ -265,7 +284,6 @@ const GameRoom: React.FC = () => {
             const uniqueId = `${title}_${timestamp.substring(0, 16)}_${votingDataHash}`;
             
             if (votingTableTitles.has(uniqueId)) {
-              console.log('📊 过滤重复的历史投票表格:', title, 'ID:', uniqueId);
               return false;
             }
             votingTableTitles.add(uniqueId);
@@ -296,7 +314,6 @@ const GameRoom: React.FC = () => {
             // 同时跟踪系统消息内容
             if (msg.content) {
               systemMessageContents.add(msg.content);
-              console.log('📚 历史加载：添加系统消息到跟踪集合:', msg.content.substring(0, 50) + '...');
             }
           } else {
             // 其他消息使用原有逻辑
@@ -701,14 +718,15 @@ const GameRoom: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const renderMessageContent = (content?: string) => {
+  // 辅助函数：渲染已完成的内容（包含完整的think标签）
+  const renderCompletedContent = (content: string) => {
     if (!content) return '';
     
-    // 解析<think></think>标签，将思考过程以灰色显示
     const parts: React.ReactElement[] = [];
     let lastIndex = 0;
     const thinkRegex = /<think>([\s\S]*?)<\/think>/gi;
     let match;
+    let hasThinkContent = false;
     
     while ((match = thinkRegex.exec(content)) !== null) {
       // 添加思考过程之前的正常内容
@@ -721,9 +739,10 @@ const GameRoom: React.FC = () => {
         }
       }
       
-      // 添加思考过程（灰色显示）
+      // 添加思考过程（已完成的思考显示为灰色）
       const thinkContent = match[1];
       if (thinkContent.trim()) {
+        hasThinkContent = true;
         parts.push(
           <span 
             key={`think-${match.index}`} 
@@ -748,6 +767,10 @@ const GameRoom: React.FC = () => {
     if (lastIndex < content.length) {
       const remainingText = content.slice(lastIndex);
       if (remainingText.trim()) {
+        // 如果有思考过程且有剩余内容，在思考过程后添加换行
+        if (hasThinkContent && parts.length > 0) {
+          parts.push(<br key={`break-${lastIndex}`} />);
+        }
         parts.push(
           <span key={`normal-${lastIndex}`}>{remainingText}</span>
         );
@@ -761,22 +784,69 @@ const GameRoom: React.FC = () => {
     
     return (
       <React.Fragment>
-        {parts.map((part, index) => (
-          <React.Fragment key={index}>
-            {part}
-            {index < parts.length - 1 && parts[index + 1].key?.startsWith('think-') && <br />}
-          </React.Fragment>
-        ))}
+        {parts.map((part, index) => part)}
       </React.Fragment>
     );
   };
 
+  const renderMessageContent = (content?: string, isStreaming?: boolean) => {
+    if (!content) return '';
+    
+    // 如果是流式输出，先检查是否有未完成的思考过程
+    if (isStreaming) {
+      // 检查是否有未闭合的<think>标签
+      const openThinkIndex = content.lastIndexOf('<think>');
+      const closeThinkIndex = content.lastIndexOf('</think>');
+      
+      if (openThinkIndex > -1 && (closeThinkIndex === -1 || openThinkIndex > closeThinkIndex)) {
+        // 有未完成的思考过程，保持正常颜色显示
+        const beforeThink = content.slice(0, openThinkIndex);
+        const thinkContent = content.slice(openThinkIndex + 7); // 跳过 '<think>'
+        
+        // 检查思考过程之前是否有已完成的思考过程
+        const hasCompletedThink = beforeThink.includes('</think>');
+        
+        return (
+          <React.Fragment>
+            {renderCompletedContent(beforeThink)}
+            {hasCompletedThink && beforeThink.trim() && <br />}
+            <span 
+              style={{ 
+                fontStyle: 'italic',
+                backgroundColor: '#f9f9f9',
+                padding: '2px 4px',
+                borderRadius: '3px',
+                fontSize: '0.9em'
+              }}
+            >
+              💭 {thinkContent}
+            </span>
+          </React.Fragment>
+        );
+      }
+    }
+    
+    // 处理已完成的内容（包含完整的think标签或非流式输出）
+    return renderCompletedContent(content);
+  };
+
   const handleWebSocketMessage = useCallback((message: ChatMessage) => {
-    // 检查消息是否有ID且已经处理过
+    // 流式消息类型不需要去重，因为它们共享同一个message_id但需要分别处理
+    const streamingMessageTypes = [
+      'message_start', 'message_chunk', 'message_complete', 'message_error',
+      'defense_start', 'defense_chunk', 'defense_complete', 'defense_error'
+    ];
+    
+    // 检查消息是否有ID且已经处理过（排除流式消息）
     const messageId = (message as any).message_id;
-    if (messageId) {
+    if (messageId && !streamingMessageTypes.includes(message.type)) {
       if (processedMessageIds.has(messageId)) {
-        console.log('忽略重复消息:', messageId, message.type);
+        // 只在开发模式下记录重复消息
+        if (process.env.NODE_ENV === 'development' && 
+            message.type !== 'pong' && 
+            message.type !== 'system_message') {
+          console.log('🔄 忽略重复消息:', messageId, message.type);
+        }
         return;
       }
       // 记录已处理的消息ID
@@ -787,7 +857,13 @@ const GameRoom: React.FC = () => {
       });
     }
 
-    console.log('处理消息:', messageId, message.type);
+    // 只在开发模式下记录非流式消息，排除常见的重复消息
+    if (process.env.NODE_ENV === 'development' && 
+        !streamingMessageTypes.includes(message.type) &&
+        message.type !== 'pong' && 
+        message.type !== 'system_message') {
+      console.log('📨 处理消息:', messageId, message.type);
+    }
 
     switch (message.type) {
       case 'connected':
@@ -797,14 +873,14 @@ const GameRoom: React.FC = () => {
         break;
       
       case 'pong':
-        // 收到心跳回应，连接正常
-        console.log('💓 心跳正常');
+        // 收到心跳回应，连接正常（减少日志输出）
         break;
       
       case 'system_message':
-        console.log('🔔 收到系统消息:', message.content?.substring(0, 50) + '...');
-        console.log('📊 当前已处理的系统消息数量:', processedSystemMessages.size);
-        console.log('📊 当前消息列表长度:', messages.length);
+        // 减少系统消息日志输出
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔔 收到系统消息:', message.content?.substring(0, 30) + '...');
+        }
         
         // 检查是否已存在相同内容的系统消息（避免重复显示）
         // 但是要允许某些重要的阶段转换消息重复显示
@@ -815,7 +891,7 @@ const GameRoom: React.FC = () => {
                                       content.includes('追加投票开始');
         
         if (!isImportantPhaseMessage && processedSystemMessages.has(content)) {
-          console.log('🗑️ 忽略重复的系统消息内容:', content.substring(0, 30) + '...');
+          // 减少重复系统消息日志
           break;
         }
         
@@ -823,21 +899,15 @@ const GameRoom: React.FC = () => {
         setProcessedSystemMessages(prev => {
           const newSet = new Set(prev);
           newSet.add(message.content || '');
-          console.log('📝 已添加系统消息到跟踪集合，新集合大小:', newSet.size);
           return newSet;
         });
         
-        // 使用通用的消息ID机制（如果有的话）
-        console.log('✅ 添加新的系统消息到界面:', message.content?.substring(0, 50) + '...');
-        setMessages(prev => {
-          const newMessages = [...prev, {
-            type: 'system',
-            content: message.content,
-            timestamp: message.timestamp || new Date().toISOString()
-          }];
-          console.log('📊 更新后消息列表长度:', newMessages.length);
-          return newMessages;
-        });
+        // 添加新的系统消息到界面
+        setMessages(prev => [...prev, {
+          type: 'system',
+          content: message.content,
+          timestamp: message.timestamp || new Date().toISOString()
+        }]);
         break;
       
       case 'round_start':
@@ -867,6 +937,177 @@ const GameRoom: React.FC = () => {
           timestamp: message.timestamp,
           sequence: message.sequence
         }]);
+        break;
+      
+      // 流式消息处理
+      case 'message_start':
+        // AI开始发言
+        console.log(`🗣️ ${message.participant_name} 开始发言`);
+        setMessages(prev => [...prev, {
+          type: 'chat',
+          participant_id: message.participant_id,
+          participant_name: message.participant_name,
+          content: '',
+          timestamp: message.timestamp,
+          message_id: message.message_id,
+          isStreaming: true,
+          streamingContent: ''
+        }]);
+        break;
+      
+      case 'message_chunk':
+        // 接收到AI发言片段
+        setMessages(prev => {
+          const newMessages = [...prev];
+          // 找到对应的流式消息
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              streamingContent: (newMessages[streamingMessageIndex].streamingContent || '') + message.chunk
+            };
+          }
+          return newMessages;
+        });
+        break;
+      
+      case 'message_complete':
+        // AI发言完成
+        console.log(`✅ ${message.participant_name} 发言结束`);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              content: message.content,
+              isStreaming: false,
+              streamingContent: undefined
+            };
+          }
+          return newMessages;
+        });
+        
+        // 标记这个消息已完成，避免重复处理
+        if (message.message_id) {
+          setProcessedMessageIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(message.message_id!);
+            return newSet;
+          });
+        }
+        break;
+      
+      case 'message_error':
+        // AI发言出错
+        console.log(`❌ ${message.participant_name || '未知参与者'} 发言出错: ${message.error}`);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              content: `[发言错误: ${message.error}]`,
+              isStreaming: false,
+              streamingContent: undefined
+            };
+          }
+          return newMessages;
+        });
+        break;
+      
+      // 最终申辞流式处理
+      case 'defense_start':
+        // 开始最终申辞
+        console.log(`🛡️ ${message.participant_name} 开始最终申辞`);
+        setMessages(prev => [...prev, {
+          type: 'chat',
+          participant_id: message.participant_id,
+          participant_name: message.participant_name + ' (最终申辞)',
+          content: '',
+          timestamp: message.timestamp,
+          message_id: message.message_id,
+          isStreaming: true,
+          streamingContent: ''
+        }]);
+        break;
+      
+      case 'defense_chunk':
+        // 接收到申辞片段
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              streamingContent: (newMessages[streamingMessageIndex].streamingContent || '') + message.chunk
+            };
+          }
+          return newMessages;
+        });
+        break;
+      
+      case 'defense_complete':
+        // 申辞完成
+        console.log(`✅ ${message.participant_name} 最终申辞结束`);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              content: message.content,
+              isStreaming: false,
+              streamingContent: undefined
+            };
+          }
+          return newMessages;
+        });
+        
+        // 标记这个申辞已完成，避免重复处理
+        if (message.message_id) {
+          setProcessedMessageIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(message.message_id!);
+            return newSet;
+          });
+        }
+        break;
+      
+      case 'defense_error':
+        // 申辞出错
+        console.log(`❌ ${message.participant_name || '未知参与者'} 申辞出错: ${message.error}`);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const streamingMessageIndex = newMessages.findIndex(msg => 
+            msg.message_id === message.message_id && msg.isStreaming
+          );
+          
+          if (streamingMessageIndex !== -1) {
+            newMessages[streamingMessageIndex] = {
+              ...newMessages[streamingMessageIndex],
+              content: `[申辞错误: ${message.error}]`,
+              isStreaming: false,
+              streamingContent: undefined
+            };
+          }
+          return newMessages;
+        });
         break;
       
       case 'voting_start':
@@ -1031,12 +1272,10 @@ const GameRoom: React.FC = () => {
         });
         
         if (existingVotingTable) {
-          console.log('📊 跳过重复的投票表格:', message.title, '时间:', newTimestamp);
           break;
         }
         
         // 直接显示后端广播的投票表格
-        console.log('📊 添加新的投票表格:', message.title, '时间:', newTimestamp);
         setMessages(prev => [...prev, {
           type: 'voting_table',
           voting_data: message.voting_data,
@@ -1423,7 +1662,23 @@ const GameRoom: React.FC = () => {
                           </Typography>
                         </Box>
                         <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
-                          {renderMessageContent(message.content)}
+                          {message.isStreaming 
+                            ? (
+                              <span>
+                                {renderMessageContent(message.streamingContent || '', true)}
+                                <span 
+                                  style={{ 
+                                    opacity: 0.7, 
+                                    animation: 'blink 1s infinite',
+                                    marginLeft: '2px' 
+                                  }}
+                                >
+                                  |
+                                </span>
+                              </span>
+                            )
+                            : renderMessageContent(message.content, false)
+                          }
                         </Typography>
                       </CardContent>
                     </Card>

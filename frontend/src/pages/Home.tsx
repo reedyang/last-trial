@@ -264,23 +264,21 @@ const Home: React.FC = () => {
               <ListItem key={game.id} divider>
                 <ListItemText
                   primary={
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Typography variant="h6">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 500 }}>
                         游戏 #{game.id}
-                      </Typography>
+                      </span>
                       <Chip
                         label={getStatusText(game.status)}
                         color={getStatusColor(game.status) as any}
                         size="small"
                       />
-                    </Box>
+                    </span>
                   }
                   secondary={
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        开始时间: {formatDateTime(game.start_time)}
-                      </Typography>
-                    </Box>
+                    <span style={{ fontSize: '0.875rem', color: 'rgba(0, 0, 0, 0.6)' }}>
+                      开始时间: {formatDateTime(game.start_time)}
+                    </span>
                   }
                 />
                 <ListItemSecondaryAction>

@@ -4,7 +4,8 @@ Ollama集成服务
 
 import httpx
 import asyncio
-from typing import List, Optional
+import json
+from typing import List, Optional, AsyncGenerator
 from app.core.config import settings
 from app.schemas.ollama_schemas import ModelInfo, ChatResponse
 
@@ -37,7 +38,7 @@ class OllamaService:
             return models
     
     async def chat(self, model: str, message: str, context: Optional[str] = None) -> ChatResponse:
-        """与模型对话"""
+        """与模型对话（非流式）"""
         payload = {
             "model": model,
             "prompt": message,
@@ -63,6 +64,46 @@ class OllamaService:
                 eval_count=data.get("eval_count"),
                 eval_duration=data.get("eval_duration")
             )
+    
+    async def chat_stream(self, model: str, message: str, context: Optional[str] = None) -> AsyncGenerator[str, None]:
+        """与模型对话（流式输出）"""
+        payload = {
+            "model": model,
+            "prompt": message,
+            "stream": True
+        }
+        
+        if context:
+            payload["context"] = context
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
+                    response.raise_for_status()
+                    
+                    async for line in response.aiter_lines():
+                        if line.strip():
+                            try:
+                                data = json.loads(line)
+                                if "response" in data and data["response"]:
+                                    # 逐个字符或词语yield输出
+                                    text_chunk = data["response"]
+                                    yield text_chunk
+                                
+                                # 检查是否完成
+                                if data.get("done", False):
+                                    break
+                                    
+                            except json.JSONDecodeError:
+                                # 忽略无法解析的行
+                                continue
+                        
+        except Exception as e:
+            # 减少日志输出，只在必要时记录错误
+            if not isinstance(e, (ConnectionError, TimeoutError)):
+                print(f"流式对话错误: {e}")
+            # 在异常情况下yield错误信息
+            yield f"[错误: {str(e)}]"
     
     async def check_health(self) -> bool:
         """检查Ollama服务健康状态"""
