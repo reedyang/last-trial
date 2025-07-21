@@ -16,7 +16,10 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  FormControlLabel,
+  Checkbox,
+  FormGroup
 } from '@mui/material';
 import { ArrowBack as BackIcon, PlayArrow as StartIcon } from '@mui/icons-material';
 import { gameService } from '../services/gameService';
@@ -26,13 +29,12 @@ const CreateGame: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogContent, setDialogContent] = useState({ title: '', message: '', isSuccess: false });
   const [formData, setFormData] = useState({
-    max_round_time: 600,
-    min_participants: 3,
-    max_participants: 8
+    max_round_time: 600
   });
   const [createdGameId, setCreatedGameId] = useState<number | null>(null);
 
@@ -44,6 +46,8 @@ const CreateGame: React.FC = () => {
     try {
       const modelsData = await ollamaService.getModels();
       setModels(modelsData);
+      // 默认选择所有模型
+      setSelectedModels(modelsData.map(model => model.name));
     } catch (error) {
       console.error('获取模型列表失败:', error);
     } finally {
@@ -56,7 +60,11 @@ const CreateGame: React.FC = () => {
     setLoading(true);
 
     try {
-      const game = await gameService.createGame(formData);
+      const gameData = {
+        ...formData,
+        selected_models: selectedModels.length > 0 ? selectedModels : undefined
+      };
+      const game = await gameService.createGame(gameData);
       setCreatedGameId(game.id);
       setDialogContent({
         title: '🎉 审判启动成功',
@@ -91,6 +99,24 @@ const CreateGame: React.FC = () => {
     }));
   };
 
+  const handleModelToggle = (modelName: string) => {
+    setSelectedModels(prev => {
+      if (prev.includes(modelName)) {
+        return prev.filter(name => name !== modelName);
+      } else {
+        return [...prev, modelName];
+      }
+    });
+  };
+
+  const isExternalModel = (modelName: string) => {
+    return modelName.startsWith('external:');
+  };
+
+  const getModelDisplayName = (modelName: string) => {
+    return isExternalModel(modelName) ? modelName.replace('external:', '') : modelName;
+  };
+
   return (
     <Box>
       <Box display="flex" alignItems="center" mb={3}>
@@ -107,6 +133,98 @@ const CreateGame: React.FC = () => {
       </Box>
 
       <Grid container spacing={3}>
+        {/* 模型选择 */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3 }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6">
+                选择AI模型 ({selectedModels.length}/{models.length})
+              </Typography>
+              <Box>
+                <Button 
+                  size="small" 
+                  onClick={() => setSelectedModels(models.map(m => m.name))}
+                  disabled={selectedModels.length === models.length}
+                >
+                  全选
+                </Button>
+                <Button 
+                  size="small" 
+                  onClick={() => setSelectedModels([])}
+                  disabled={selectedModels.length === 0}
+                  sx={{ ml: 1 }}
+                >
+                  全不选
+                </Button>
+              </Box>
+            </Box>
+
+            {loadingModels ? (
+              <Box display="flex" justifyContent="center" p={2}>
+                <CircularProgress />
+              </Box>
+            ) : models.length === 0 ? (
+              <Alert severity="error">
+                未检测到可用模型。请确保Ollama正在运行并已下载模型，或添加外部模型。
+              </Alert>
+            ) : (
+              <>
+                                 <Alert 
+                   severity={selectedModels.length >= 3 ? "success" : "warning"} 
+                   sx={{ mb: 2 }}
+                 >
+                   {selectedModels.length >= 3 
+                     ? `已选择 ${selectedModels.length} 个模型，满足审判要求！` 
+                     : `至少需要选择 3 个模型参与审判`
+                   }
+                 </Alert>
+                
+                <FormGroup sx={{ maxHeight: 200, overflow: 'auto' }}>
+                  {models.map((model) => (
+                    <FormControlLabel
+                      key={model.name}
+                      control={
+                        <Checkbox
+                          checked={selectedModels.includes(model.name)}
+                          onChange={() => handleModelToggle(model.name)}
+                          size="small"
+                        />
+                      }
+                      label={
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="body2">
+                            {getModelDisplayName(model.name)}
+                          </Typography>
+                          {isExternalModel(model.name) && (
+                            <Chip 
+                              label="外部" 
+                              size="small" 
+                              color="secondary" 
+                              variant="outlined"
+                            />
+                          )}
+                        </Box>
+                      }
+                      sx={{ '& .MuiFormControlLabel-label': { width: '100%' } }}
+                    />
+                  ))}
+                </FormGroup>
+
+                <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
+                  审判将从选中的模型中分配AI参与者，进行终极身份伪装对抗。
+                </Typography>
+              </>
+            )}
+
+                         {selectedModels.length < 3 && (
+               <Alert severity="warning" sx={{ mt: 2 }}>
+                 当前选择模型数量 ({selectedModels.length}) 少于最少要求 (3个)。
+                 请选择更多模型参与审判。
+               </Alert>
+             )}
+          </Paper>
+        </Grid>
+
         {/* 游戏设置 */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
@@ -125,28 +243,10 @@ const CreateGame: React.FC = () => {
                 inputProps={{ min: 60, max: 1800 }}
                 helperText="建议 600 秒（10分钟）进行完整辩论"
               />
-
-              <TextField
-                fullWidth
-                label="最少参与者数量"
-                type="number"
-                value={formData.min_participants}
-                onChange={handleInputChange('min_participants')}
-                margin="normal"
-                inputProps={{ min: 3, max: 10 }}
-                helperText="至少需要3人（1个AI间谍 + 2个人类）"
-              />
-
-              <TextField
-                fullWidth
-                label="最多参与者数量"
-                type="number"
-                value={formData.max_participants}
-                onChange={handleInputChange('max_participants')}
-                margin="normal"
-                inputProps={{ min: formData.min_participants, max: 15 }}
-                helperText="建议不超过8人，便于观察和辩论"
-              />
+              
+              <Alert severity="info" sx={{ mt: 2 }}>
+                参与者数量将根据您选择的AI模型数量自动确定
+              </Alert>
 
               <Divider sx={{ my: 2 }} />
 
@@ -155,62 +255,13 @@ const CreateGame: React.FC = () => {
                 variant="contained"
                 size="large"
                 startIcon={<StartIcon />}
-                disabled={loading || models.length < formData.min_participants}
+                disabled={loading || selectedModels.length < 3}
                 fullWidth
                 sx={{ mt: 2 }}
               >
                 {loading ? <CircularProgress size={24} /> : '创建游戏'}
               </Button>
             </Box>
-          </Paper>
-        </Grid>
-
-        {/* 模型状态 */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              可用AI模型 ({models.length} 个)
-            </Typography>
-
-            {loadingModels ? (
-              <Box display="flex" justifyContent="center" p={2}>
-                <CircularProgress />
-              </Box>
-            ) : models.length === 0 ? (
-              <Alert severity="error">
-                未检测到可用的Ollama模型。请确保Ollama正在运行并已下载模型。
-              </Alert>
-            ) : (
-              <>
-                <Alert severity="success" sx={{ mb: 2 }}>
-                  检测到 {models.length} 个可用模型，满足审判要求！
-                </Alert>
-                
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {models.map((model) => (
-                    <Chip
-                      key={model.name}
-                      label={model.name}
-                      variant="outlined"
-                      size="small"
-                      color="primary"
-                      sx={{ mb: 1 }}
-                    />
-                  ))}
-                </Box>
-
-                <Typography variant="body2">
-                  审判将从这些模型中选择若干AI参与者，进行终极身份伪装对抗。
-                </Typography>
-              </>
-            )}
-
-            {models.length < formData.min_participants && (
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                当前模型数量 ({models.length}) 少于最少参与者数量 ({formData.min_participants})。
-                请降低最少参与者数量或安装更多模型。
-              </Alert>
-            )}
           </Paper>
         </Grid>
       </Grid>

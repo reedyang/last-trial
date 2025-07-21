@@ -21,7 +21,7 @@ class GameService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.ollama_service = OllamaService()
+        self.ollama_service = OllamaService(db)  # 传递数据库连接
     
     # 预设的人类姓名池（2050年风格）
     HUMAN_NAMES = [
@@ -67,9 +67,29 @@ class GameService:
             raise ValueError("Ollama服务不可用，请确保Ollama正在运行")
         
         # 获取可用模型
-        models = await self.ollama_service.get_available_models()
-        if len(models) < game_data.min_participants:
-            raise ValueError(f"可用模型数量({len(models)})少于最少参与者数量({game_data.min_participants})")
+        all_models = await self.ollama_service.get_available_models()
+        
+        # 根据用户选择过滤模型
+        if game_data.selected_models:
+            # 验证选择的模型都是可用的
+            available_model_names = [model.name for model in all_models]
+            invalid_models = [name for name in game_data.selected_models if name not in available_model_names]
+            if invalid_models:
+                raise ValueError(f"选择的模型不可用: {', '.join(invalid_models)}")
+            
+            # 使用选择的模型
+            selected_models = [model for model in all_models if model.name in game_data.selected_models]
+            models_to_use = selected_models
+            print(f"🎯 使用用户选择的 {len(models_to_use)} 个模型: {[m.name for m in models_to_use]}")
+        else:
+            # 如果没有选择模型，使用所有可用模型
+            models_to_use = all_models
+            print(f"🎲 使用所有可用的 {len(models_to_use)} 个模型")
+        
+        # 至少需要3个模型参与游戏
+        min_required = 3
+        if len(models_to_use) < min_required:
+            raise ValueError(f"选择的模型数量({len(models_to_use)})少于最少要求({min_required}个)")
         
         # 创建游戏实例
         game = Game(
@@ -80,14 +100,18 @@ class GameService:
         self.db.commit()
         self.db.refresh(game)
         
-        # 初始化参与者
-        await self._initialize_participants(getattr(game, 'id', 0), models[:game_data.max_participants])
+        # 初始化参与者 - 使用所有选择的模型（最多15个以保证性能）
+        max_participants = 15  # 设置合理的上限
+        participants_count = min(len(models_to_use), max_participants)
+        selected_for_game = models_to_use[:participants_count]
+        await self._initialize_participants(getattr(game, 'id', 0), selected_for_game)
         
         return GameResponse.model_validate(game)
     
     async def _initialize_participants(self, game_id: int, models: List) -> None:
         """初始化游戏参与者 - 新设定：所有人都是AI，但互相不知道"""
         participant_count = min(len(models), len(self.HUMAN_NAMES))
+        print(f"🎭 初始化 {participant_count} 个AI参与者，使用模型: {[m.name for m in models]}")
         
         # 随机打乱姓名和性格池
         available_names = self.HUMAN_NAMES.copy()

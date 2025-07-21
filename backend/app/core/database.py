@@ -35,6 +35,7 @@ async def init_db():
     from app.models.message import Message
     from app.models.elimination import Elimination
     from app.models.vote import Vote
+    from app.models.external_model import ExternalModel
     
     # 创建所有表
     Base.metadata.create_all(bind=engine)

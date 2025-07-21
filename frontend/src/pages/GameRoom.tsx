@@ -695,9 +695,7 @@ const GameRoom: React.FC = () => {
     }
   }, [gameId, loadInitialData]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  // 移除自动滚动逻辑，让用户可以自由浏览历史消息
 
   // 调试：监控话题变化
   useEffect(() => {
@@ -714,8 +712,42 @@ const GameRoom: React.FC = () => {
     }
   }, [game, isHistoryMode, wsConnectionStatus, connectWebSocket]);
 
+  // 监听游戏状态变为running时，自动滚动到底部
+  useEffect(() => {
+    if (game && game.status === 'running' && !isHistoryMode) {
+      console.log('🎯 游戏状态变为running，滚动到对话底部');
+      setTimeout(() => {
+        scrollToBottom();
+      }, 1000); // 增加延迟确保页面完全加载
+    }
+  }, [game?.status, isHistoryMode]);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    console.log('📜 执行滚动到底部');
+    
+    // 方案1: 滚动到页面底部
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: 'smooth'
+    });
+    
+    // 方案2: 如果messagesEndRef可用，也尝试滚动到该元素
+    if (messagesEndRef.current) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ 
+          behavior: "smooth",
+          block: "end" 
+        });
+      }, 100);
+    }
+    
+    // 方案3: 查找可能的滚动容器并滚动
+    const scrollContainers = document.querySelectorAll('[style*="overflow"], .MuiPaper-root, .MuiBox-root');
+    scrollContainers.forEach(container => {
+      if (container.scrollHeight > container.clientHeight) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
   };
 
   // 辅助函数：渲染已完成的内容（包含完整的think标签）
@@ -1308,6 +1340,12 @@ const GameRoom: React.FC = () => {
         setWsConnectionStatus('connecting');
         connectWebSocket();
       }
+      
+      // 游戏开始时滚动到底部
+      setTimeout(() => {
+        console.log('🎯 开始审判，滚动到对话底部');
+        scrollToBottom();
+      }, 1500); // 增加延迟时间确保页面和数据都更新完成
     } catch (err) {
       alert('开始游戏失败: ' + (err as Error).message);
     }

@@ -1,44 +1,78 @@
 """
-Ollama集成服务
+Ollama集成服务（支持外部模型）
 """
 
 import httpx
 import asyncio
 import json
 from typing import List, Optional, AsyncGenerator
+from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.schemas.ollama_schemas import ModelInfo, ChatResponse
+from app.models.external_model import ExternalModel
 
 class OllamaService:
-    """Ollama API集成服务"""
+    """Ollama API集成服务（支持外部模型）"""
     
-    def __init__(self):
+    def __init__(self, db: Optional[Session] = None):
         self.base_url = settings.OLLAMA_BASE_URL
         self.timeout = settings.OLLAMA_TIMEOUT
+        self.db = db
     
     async def get_available_models(self) -> List[ModelInfo]:
-        """获取可用模型列表"""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.get(f"{self.base_url}/api/tags")
-            response.raise_for_status()
-            data = response.json()
-            
-            models = []
-            for model in data.get("models", []):
-                details = model.get("details", {})
-                models.append(ModelInfo(
-                    name=model["name"],
-                    size=str(model.get("size", 0)) if model.get("size") else None,
-                    format=details.get("format"),
-                    family=details.get("family"),
-                    families=details.get("families", []),
-                    parameter_size=details.get("parameter_size"),
-                    quantization_level=details.get("quantization_level")
-                ))
-            return models
+        """获取可用模型列表（包括本地和外部模型）"""
+        models = []
+        
+        # 获取本地Ollama模型
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(f"{self.base_url}/api/tags")
+                response.raise_for_status()
+                data = response.json()
+                
+                for model in data.get("models", []):
+                    details = model.get("details", {})
+                    models.append(ModelInfo(
+                        name=model["name"],
+                        size=str(model.get("size", 0)) if model.get("size") else None,
+                        format=details.get("format"),
+                        family=details.get("family"),
+                        families=details.get("families", []),
+                        parameter_size=details.get("parameter_size"),
+                        quantization_level=details.get("quantization_level")
+                    ))
+        except Exception as e:
+            print(f"获取本地Ollama模型失败: {e}")
+        
+        # 获取外部模型
+        if self.db:
+            try:
+                external_models = self.db.query(ExternalModel).filter(
+                    ExternalModel.is_active.is_(True)
+                ).all()
+                
+                for ext_model in external_models:
+                    models.append(ModelInfo(
+                        name=f"external:{ext_model.name}",  # 添加前缀区分外部模型
+                        size=None,
+                        format="external",
+                        family=f"External ({ext_model.api_url})",
+                        families=["external"],
+                        parameter_size=None,
+                        quantization_level=None
+                    ))
+            except Exception as e:
+                print(f"获取外部模型失败: {e}")
+        
+        return models
     
     async def chat(self, model: str, message: str, context: Optional[str] = None) -> ChatResponse:
         """与模型对话（非流式）"""
+        # 检查是否是外部模型
+        if model.startswith("external:") and self.db:
+            return await self._chat_external(model, message, context)
+        
+        # 使用本地Ollama模型
         payload = {
             "model": model,
             "prompt": message,
@@ -65,8 +99,77 @@ class OllamaService:
                 eval_duration=data.get("eval_duration")
             )
     
+    async def _chat_external(self, model: str, message: str, context: Optional[str] = None) -> ChatResponse:
+        """与外部模型对话"""
+        if not self.db:
+            raise ValueError("数据库连接不可用")
+            
+        # 获取外部模型名称（去掉external:前缀）
+        model_name = model[9:]  # 去掉 "external:" 前缀
+        
+        external_model = self.db.query(ExternalModel).filter(
+            ExternalModel.name == model_name,
+            ExternalModel.is_active.is_(True)
+        ).first()
+        
+        if not external_model:
+            raise ValueError(f"外部模型 {model_name} 不存在或未启用")
+        
+        # 构建请求
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # 检查API密钥
+        api_key = getattr(external_model, 'api_key', None)
+        if api_key and str(api_key).strip():
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        # 构建消息内容
+        full_message = message
+        if context:
+            full_message = f"Context: {context}\n\nMessage: {message}"
+        
+        request_body = {
+            "model": external_model.model_id,
+            "messages": [
+                {"role": "user", "content": full_message}
+            ],
+            "stream": False,
+            "max_tokens": 500
+        }
+        
+        async with httpx.AsyncClient(timeout=self.timeout, verify=False) as client:
+            api_endpoint = external_model.api_url.rstrip('/')
+            
+            response = await client.post(
+                api_endpoint,
+                json=request_body,
+                headers=headers
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            if 'choices' in result and len(result['choices']) > 0:
+                content = result['choices'][0].get('message', {}).get('content', '')
+                return ChatResponse(
+                    model=model,
+                    message=content,
+                    done=True
+                )
+            
+            raise ValueError("外部模型API响应格式不正确")
+    
     async def chat_stream(self, model: str, message: str, context: Optional[str] = None) -> AsyncGenerator[str, None]:
         """与模型对话（流式输出）"""
+        # 检查是否是外部模型
+        if model.startswith("external:") and self.db:
+            async for chunk in self._chat_stream_external(model, message, context):
+                yield chunk
+            return
+        
+        # 使用本地Ollama模型
         payload = {
             "model": model,
             "prompt": message,
@@ -112,4 +215,75 @@ class OllamaService:
                 response = await client.get(f"{self.base_url}/api/tags")
                 return response.status_code == 200
         except Exception:
-            return False 
+            return False
+    
+    async def _chat_stream_external(self, model: str, message: str, context: Optional[str] = None) -> AsyncGenerator[str, None]:
+        """与外部模型进行流式对话"""
+        if not self.db:
+            raise ValueError("数据库连接不可用")
+            
+        # 获取外部模型名称（去掉external:前缀）
+        model_name = model[9:]  # 去掉 "external:" 前缀
+        
+        external_model = self.db.query(ExternalModel).filter(
+            ExternalModel.name == model_name,
+            ExternalModel.is_active.is_(True)
+        ).first()
+        
+        if not external_model:
+            raise ValueError(f"外部模型 {model_name} 不存在或未启用")
+        
+        # 构建请求
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # 检查API密钥
+        api_key = getattr(external_model, 'api_key', None)
+        if api_key and str(api_key).strip():
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        # 构建消息内容
+        full_message = message
+        if context:
+            full_message = f"Context: {context}\n\nMessage: {message}"
+        
+        request_body = {
+            "model": external_model.model_id,
+            "messages": [
+                {"role": "user", "content": full_message}
+            ],
+            "stream": True,
+            "max_tokens": 500
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, verify=False) as client:
+                api_endpoint = str(external_model.api_url).rstrip('/')
+                
+                async with client.stream(
+                    "POST",
+                    api_endpoint,
+                    json=request_body,
+                    headers=headers
+                ) as response:
+                    response.raise_for_status()
+                    
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data = line[6:]  # 去掉 "data: " 前缀
+                            if data.strip() == "[DONE]":
+                                break
+                            
+                            try:
+                                chunk_data = json.loads(data)
+                                if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                    delta = chunk_data['choices'][0].get('delta', {})
+                                    content = delta.get('content', '')
+                                    if content:
+                                        yield content
+                            except json.JSONDecodeError:
+                                continue
+                
+        except Exception as e:
+            yield f"[外部模型错误: {str(e)}]" 

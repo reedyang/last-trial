@@ -22,7 +22,7 @@ class ChatService:
     
     def __init__(self, db: Session, websocket_manager: WebSocketManager):
         self.db = db
-        self.ollama_service = OllamaService()
+        self.ollama_service = OllamaService(db)  # 传递数据库连接
         self.websocket_manager = websocket_manager
     
     def _format_timestamp_with_timezone(self, timestamp: Optional[datetime]) -> str:

@@ -17,6 +17,7 @@ import { HelpOutline as HelpIcon } from '@mui/icons-material';
 import Home from './pages/Home';
 import GameRoom from './pages/GameRoom';
 import CreateGame from './pages/CreateGame';
+import ExternalModels from './pages/ExternalModels';
 
 function App() {
   const [gameIntroOpen, setGameIntroOpen] = useState(false);
@@ -51,6 +52,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/create" element={<CreateGame />} />
           <Route path="/game/:gameId" element={<GameRoom />} />
+          <Route path="/external-models" element={<ExternalModels />} />
         </Routes>
       </Container>
 

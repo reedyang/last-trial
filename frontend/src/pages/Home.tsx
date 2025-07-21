@@ -54,6 +54,7 @@ const Home: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [gameToDelete, setGameToDelete] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showAllModels, setShowAllModels] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -196,8 +197,8 @@ const Home: React.FC = () => {
               <Typography variant="h6" gutterBottom>
                 可用模型
               </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {models.slice(0, 3).map((model) => (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                {(showAllModels ? models : models.slice(0, 3)).map((model) => (
                   <Chip 
                     key={model.name} 
                     label={model.name} 
@@ -205,15 +206,35 @@ const Home: React.FC = () => {
                     size="small"
                   />
                 ))}
-                {models.length > 3 && (
+                {models.length > 3 && !showAllModels && (
                   <Chip 
                     label={`+${models.length - 3} 更多`} 
                     variant="outlined" 
                     size="small"
                     color="primary"
+                    onClick={() => setShowAllModels(true)}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                )}
+                {showAllModels && models.length > 3 && (
+                  <Chip 
+                    label="收起" 
+                    variant="outlined" 
+                    size="small"
+                    color="secondary"
+                    onClick={() => setShowAllModels(false)}
+                    sx={{ cursor: 'pointer' }}
                   />
                 )}
               </Box>
+              <Button
+                variant="outlined"
+                fullWidth
+                onClick={() => navigate('/external-models')}
+                size="small"
+              >
+                管理外部模型
+              </Button>
             </CardContent>
           </Card>
         </Grid>
@@ -229,7 +250,7 @@ const Home: React.FC = () => {
                 startIcon={<AddIcon />}
                 fullWidth
                 onClick={() => navigate('/create')}
-                disabled={ollamaStatus !== 'healthy' || models.length < 2}
+                disabled={ollamaStatus !== 'healthy'}
                 sx={{ mt: 1 }}
               >
                 创建新游戏

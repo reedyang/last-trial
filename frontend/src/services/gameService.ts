@@ -6,8 +6,7 @@ const API_BASE_URL = 'http://localhost:8001/api';
 
 export interface GameCreateRequest {
   max_round_time?: number;
-  min_participants?: number;
-  max_participants?: number;
+  selected_models?: string[];
 }
 
 export interface Game {
@@ -31,7 +30,7 @@ export interface GameStatus {
 
 export const gameService = {
   // 创建游戏
-  async createGame(gameData: { max_round_time: number; min_participants: number; max_participants: number }) {
+  async createGame(gameData: GameCreateRequest) {
     const response = await fetch(`${API_BASE_URL}/game/create`, {
       method: 'POST',
       headers: {

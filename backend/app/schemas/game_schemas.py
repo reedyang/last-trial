@@ -9,8 +9,7 @@ from datetime import datetime
 class GameCreate(BaseModel):
     """创建游戏的请求模式"""
     max_round_time: int = Field(default=300, description="每轮最大时间（秒）")
-    min_participants: int = Field(default=3, description="最少参与者数量")
-    max_participants: int = Field(default=10, description="最多参与者数量")
+    selected_models: Optional[List[str]] = Field(default=None, description="选择的模型列表")
 
 class GameResponse(BaseModel):
     """游戏响应模式"""

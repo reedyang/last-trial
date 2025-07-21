@@ -2,17 +2,19 @@
 Ollama集成API路由
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
+from sqlalchemy.orm import Session
+from app.core.database import get_db
 from app.services.ollama_service import OllamaService
 from app.schemas.ollama_schemas import ModelInfo, ChatRequest, ChatResponse
 
 router = APIRouter()
 
 @router.get("/models", response_model=List[ModelInfo])
-async def get_available_models():
-    """获取可用的Ollama模型列表"""
-    ollama_service = OllamaService()
+async def get_available_models(db: Session = Depends(get_db)):
+    """获取可用的模型列表（包括本地和外部模型）"""
+    ollama_service = OllamaService(db=db)
     try:
         models = await ollama_service.get_available_models()
         return models
