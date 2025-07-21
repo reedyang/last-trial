@@ -123,6 +123,7 @@ async def test_existing_external_model(
             raise HTTPException(status_code=404, detail="外部模型不存在")
         
         test_data = ExternalModelTest(
+            api_type=model.api_type,
             api_url=model.api_url,
             model_id=model.model_id,
             api_key=model.api_key

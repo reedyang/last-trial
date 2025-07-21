@@ -2,9 +2,15 @@
 外部AI模型数据模型
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Enum
 from sqlalchemy.sql import func
 from app.core.database import Base
+import enum
+
+class APIType(enum.Enum):
+    """API类型枚举"""
+    OPENAI = "OPENAI"           # OpenAI兼容API
+    OPENWEBUI = "OPENWEBUI"     # OpenWebUI API
 
 class ExternalModel(Base):
     """外部AI模型表"""
@@ -12,7 +18,8 @@ class ExternalModel(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False, unique=True)  # 自定义显示名称
-    api_url = Column(String(500), nullable=False)           # OpenWebUI API地址
+    api_type = Column(Enum(APIType), nullable=False, default=APIType.OPENWEBUI)  # API类型
+    api_url = Column(String(500), nullable=False)           # API地址
     model_id = Column(String(200), nullable=False)          # 实际模型ID
     api_key = Column(String(500), nullable=True)            # API密钥（可选）
     description = Column(Text, nullable=True)               # 模型描述

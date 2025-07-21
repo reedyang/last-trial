@@ -5,12 +5,13 @@
 import httpx
 import time
 import asyncio
+import json
 from typing import List, Optional, AsyncGenerator
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
 
-from app.models.external_model import ExternalModel
+from app.models.external_model import ExternalModel, APIType
 from app.schemas.external_model_schemas import (
     ExternalModelCreate, 
     ExternalModelUpdate, 
@@ -25,6 +26,44 @@ class ExternalModelService:
     def __init__(self, db: Session):
         self.db = db
     
+    def _build_complete_api_url(self, api_type: APIType, base_url: str) -> str:
+        """根据API类型构建完整的API端点"""
+        base_url = base_url.rstrip('/')
+        
+        if api_type == APIType.OPENAI:
+            # OpenAI格式: /v1/chat/completions
+            if base_url.endswith('/v1/chat/completions'):
+                return base_url
+            elif base_url.endswith('/v1'):
+                return f"{base_url}/chat/completions"
+            else:
+                return f"{base_url}/v1/chat/completions"
+        else:
+            # OpenWebUI格式: /api/chat/completions
+            if base_url.endswith('/api/chat/completions'):
+                return base_url
+            elif base_url.endswith('/api'):
+                return f"{base_url}/chat/completions"
+            else:
+                return f"{base_url}/api/chat/completions"
+    
+    def _build_request_body(self, api_type: APIType, model_id: str, message: str, stream: bool = False, max_tokens: int = 500) -> dict:
+        """根据API类型构建请求体"""
+        base_request = {
+            "model": model_id,
+            "messages": [
+                {"role": "user", "content": message}
+            ],
+            "stream": stream,
+            "max_tokens": max_tokens
+        }
+        
+        if api_type == APIType.OPENAI:
+            # OpenAI API可能需要额外的参数
+            base_request["temperature"] = 0.7
+            
+        return base_request
+    
     async def create_model(self, model_data: ExternalModelCreate) -> ExternalModelResponse:
         """创建外部模型"""
         # 检查名称是否重复
@@ -37,6 +76,7 @@ class ExternalModelService:
         # 创建模型
         model = ExternalModel(
             name=model_data.name,
+            api_type=model_data.api_type,
             api_url=model_data.api_url,
             model_id=model_data.model_id,
             api_key=model_data.api_key,
@@ -104,7 +144,9 @@ class ExternalModelService:
     
     async def test_model(self, test_data: ExternalModelTest) -> ExternalModelTestResponse:
         """测试外部模型连接"""
-        print(f"🧪 开始测试外部模型连接...")
+        api_type_name = "OpenAI API" if test_data.api_type == APIType.OPENAI else "OpenWebUI API"
+        print(f"🧪 开始测试{api_type_name}连接...")
+        print(f"   API Type: {test_data.api_type.value}")
         print(f"   API URL: {test_data.api_url}")
         print(f"   Model ID: {test_data.model_id}")
         print(f"   Has API Key: {bool(test_data.api_key)}")
@@ -113,7 +155,7 @@ class ExternalModelService:
         start_time = time.time()
         
         try:
-            # 构建请求
+            # 构建请求头
             headers = {
                 "Content-Type": "application/json"
             }
@@ -124,23 +166,15 @@ class ExternalModelService:
             # 测试消息
             test_message = "Hello, this is a test message. Please respond briefly."
             
-            # 构建OpenWebUI兼容的请求体
-            request_body = {
-                "model": test_data.model_id,
-                "messages": [
-                    {"role": "user", "content": test_message}
-                ],
-                "stream": False,
-                "max_tokens": 50
-            }
+            # 根据API类型构建端点和请求体
+            api_endpoint = self._build_complete_api_url(test_data.api_type, test_data.api_url)
+            request_body = self._build_request_body(test_data.api_type, test_data.model_id, test_message, stream=False, max_tokens=50)
+            
+            print(f"   请求端点: {api_endpoint}")
+            print(f"   请求体: {request_body}")
             
             # 发送请求 (禁用SSL验证以支持企业内网自签名证书)
             async with httpx.AsyncClient(timeout=30, verify=False) as client:
-                # 直接使用提供的API URL（用户应该提供完整的端点）
-                api_endpoint = test_data.api_url.rstrip('/')
-                print(f"   请求端点: {api_endpoint}")
-                print(f"   请求体: {request_body}")
-                
                 response = await client.post(
                     api_endpoint,
                     json=request_body,
@@ -162,7 +196,7 @@ class ExternalModelService:
                     if content.strip():
                         success_response = ExternalModelTestResponse(
                             success=True,
-                            message=f"连接成功！模型响应: {content[:100]}{'...' if len(content) > 100 else ''}",
+                            message=f"{api_type_name}连接成功！模型响应: {content[:100]}{'...' if len(content) > 100 else ''}",
                             response_time=response_time
                         )
                         print(f"✅ 测试成功: {success_response.message}")
@@ -170,7 +204,7 @@ class ExternalModelService:
                 
                 return ExternalModelTestResponse(
                     success=False,
-                    message="API响应格式不正确",
+                    message=f"{api_type_name}响应格式不正确",
                     response_time=response_time,
                     error="响应中缺少有效内容"
                 )
@@ -243,19 +277,12 @@ class ExternalModelService:
         if model.api_key is not None and model.api_key.strip():
             headers["Authorization"] = f"Bearer {model.api_key}"
         
-        request_body = {
-            "model": model.model_id,
-            "messages": [
-                {"role": "user", "content": message}
-            ],
-            "stream": False,
-            "max_tokens": 500
-        }
+        # 根据API类型构建端点和请求体
+        api_endpoint = self._build_complete_api_url(model.api_type, model.api_url)
+        request_body = self._build_request_body(model.api_type, model.model_id, message, stream=False, max_tokens=500)
         
         try:
             async with httpx.AsyncClient(timeout=60, verify=False) as client:
-                api_endpoint = model.api_url.rstrip('/')
-                
                 response = await client.post(
                     api_endpoint,
                     json=request_body,
@@ -282,19 +309,12 @@ class ExternalModelService:
         if model.api_key is not None and model.api_key.strip():
             headers["Authorization"] = f"Bearer {model.api_key}"
         
-        request_body = {
-            "model": model.model_id,
-            "messages": [
-                {"role": "user", "content": message}
-            ],
-            "stream": True,
-            "max_tokens": 500
-        }
+        # 根据API类型构建端点和请求体
+        api_endpoint = self._build_complete_api_url(model.api_type, model.api_url)
+        request_body = self._build_request_body(model.api_type, model.model_id, message, stream=True, max_tokens=500)
         
         try:
             async with httpx.AsyncClient(timeout=60, verify=False) as client:
-                api_endpoint = model.api_url.rstrip('/')
-                
                 async with client.stream(
                     "POST",
                     api_endpoint,
@@ -310,7 +330,6 @@ class ExternalModelService:
                                 break
                             
                             try:
-                                import json
                                 chunk = json.loads(data)
                                 if 'choices' in chunk and len(chunk['choices']) > 0:
                                     delta = chunk['choices'][0].get('delta', {})

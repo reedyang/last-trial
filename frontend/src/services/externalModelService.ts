@@ -2,9 +2,15 @@
  * 外部AI模型管理服务
  */
 
+export enum APIType {
+  OPENAI = 'OPENAI',
+  OPENWEBUI = 'OPENWEBUI'
+}
+
 export interface ExternalModel {
   id: number;
   name: string;
+  api_type: APIType;
   api_url: string;
   model_id: string;
   api_key?: string;
@@ -19,6 +25,7 @@ export interface ExternalModel {
 
 export interface ExternalModelCreate {
   name: string;
+  api_type: APIType;
   api_url: string;
   model_id: string;
   api_key?: string;
@@ -28,6 +35,7 @@ export interface ExternalModelCreate {
 
 export interface ExternalModelUpdate {
   name?: string;
+  api_type?: APIType;
   api_url?: string;
   model_id?: string;
   api_key?: string;
@@ -36,6 +44,7 @@ export interface ExternalModelUpdate {
 }
 
 export interface ExternalModelTest {
+  api_type: APIType;
   api_url: string;
   model_id: string;
   api_key?: string;
