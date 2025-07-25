@@ -59,7 +59,7 @@ const ExternalModels: React.FC = () => {
   // 表单状态
   const [formData, setFormData] = useState<ExternalModelCreate>({
     name: '',
-    api_type: APIType.OPENWEBUI,
+    api_type: APIType.OPENAI,
     api_url: '',
     model_id: '',
     api_key: '',
@@ -125,7 +125,7 @@ const ExternalModels: React.FC = () => {
       setEditingModel(null);
       setFormData({
         name: '',
-        api_type: APIType.OPENWEBUI,
+        api_type: APIType.OPENAI,
         api_url: '',
         model_id: '',
         api_key: '',
