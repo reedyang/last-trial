@@ -215,13 +215,6 @@ const CreateGame: React.FC = () => {
                 </Typography>
               </>
             )}
-
-                         {selectedModels.length < 3 && (
-               <Alert severity="warning" sx={{ mt: 2 }}>
-                 当前选择模型数量 ({selectedModels.length}) 少于最少要求 (3个)。
-                 请选择更多模型参与审判。
-               </Alert>
-             )}
           </Paper>
         </Grid>
 
